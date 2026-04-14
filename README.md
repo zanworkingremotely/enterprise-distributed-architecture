@@ -4,7 +4,7 @@ TrackMyDelivery is a small delivery tracking platform built to showcase a clean 
 
 The goal is to keep the repo practical:
 
-- ASP.NET Core API for delivery commands and queries
+- .Net 10 API for delivery commands and queries
 - Domain model for delivery lifecycle rules
 - SQLite for local persistence
 - Outbox pattern for durable event storage
