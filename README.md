@@ -25,6 +25,72 @@ The goal is to keep the repo practical:
 - `TrackMyDelivery.Domain.Tests`
   Focused domain tests for delivery lifecycle behavior
 
+## Architecture diagram
+
+```mermaid
+flowchart LR
+    Client["Client / Swagger"] --> Api["TrackMyDelivery.Api"]
+
+    subgraph WriteFlow["Write flow"]
+        Api --> App["Application handlers"]
+        App --> Domain["Delivery aggregate"]
+        Domain --> Events["Delivery events raised"]
+        App --> DeliveryStore[("deliveries")]
+        App --> EventStore[("outbox_messages")]
+    end
+
+    subgraph AsyncFlow["Async flow"]
+        EventStore --> Worker["TrackMyDelivery.Worker"]
+        Worker --> TimelineStore[("tracking_events")]
+    end
+
+    subgraph ReadFlow["Read flow"]
+        Api --> QueryHandlers["Application queries"]
+        QueryHandlers --> TimelineStore
+        QueryHandlers --> DeliveryStore
+    end
+
+    DeliveryStore -. stored in .-> Sqlite[("SQLite database")]
+    EventStore -. stored in .-> Sqlite
+    TimelineStore -. stored in .-> Sqlite
+```
+
+## Layered view
+
+```mermaid
+flowchart TB
+    Api["TrackMyDelivery.Api
+    Controllers
+    Swagger
+    Health checks"]
+
+    Application["TrackMyDelivery.Application
+    Commands
+    Queries
+    Contracts
+    Interfaces"]
+
+    Domain["TrackMyDelivery.Domain
+    Delivery aggregate
+    Statuses
+    Domain events"]
+
+    Infrastructure["TrackMyDelivery.Infrastructure
+    SQLite repositories
+    Delivery event storage
+    Tracking timeline updater"]
+
+    Worker["TrackMyDelivery.Worker
+    Background service
+    Async processing"]
+
+    Api --> Application
+    Application --> Domain
+    Application --> Infrastructure
+    Worker --> Infrastructure
+    Infrastructure --> Domain
+```
+
 ## How it works
 
 1. A client creates a delivery through the API.
