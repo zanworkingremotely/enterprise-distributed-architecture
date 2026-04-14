@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/TrackMyDelivery.Application/">
+    <Project Path="TrackMyDelivery.Application/TrackMydelivery.Application.csproj" />
+  </Folder>
+  <Project Path="TrackMyDelivery.Api/TrackMyDelivery.Api.csproj" />
+  <Project Path="TrackMyDelivery.Domain.Tests/TrackMyDelivery.Domain.Tests.csproj" />
+  <Project Path="TrackMyDelivery.Domain/TrackMyDelivery.Domain.csproj" />
+  <Project Path="TrackMyDelivery.Infrastructure/TrackMyDelivery.Infrastructure.csproj" />
+  <Project Path="TrackMyDelivery.Worker/TrackMyDelivery.Worker.csproj" />
+</Solution>
