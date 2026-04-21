@@ -8,13 +8,19 @@ namespace TrackMyDelivery.Infrastructure.Data;
 
 public sealed class DeliveryTrackingUpdater : IDeliveryTrackingUpdater
 {
+    private const int MaxRetryCount = 3;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly SqliteConnectionFactory _connectionFactory;
+    private readonly IDateTimeProvider _dateTimeProvider;
     private readonly ILogger<DeliveryTrackingUpdater> _logger;
 
-    public DeliveryTrackingUpdater(SqliteConnectionFactory connectionFactory, ILogger<DeliveryTrackingUpdater> logger)
+    public DeliveryTrackingUpdater(
+        SqliteConnectionFactory connectionFactory,
+        IDateTimeProvider dateTimeProvider,
+        ILogger<DeliveryTrackingUpdater> logger)
     {
         _connectionFactory = connectionFactory;
+        _dateTimeProvider = dateTimeProvider;
         _logger = logger;
         new SqliteDatabaseInitializer(connectionFactory).Initialize();
     }
@@ -29,11 +35,14 @@ public sealed class DeliveryTrackingUpdater : IDeliveryTrackingUpdater
         {
             selectCommand.CommandText =
                 """
-                SELECT id, type, payload
+                SELECT id, type, payload, retry_count
                 FROM outbox_messages
                 WHERE processed_on_utc IS NULL
+                  AND dead_lettered_on_utc IS NULL
+                  AND (next_attempt_utc IS NULL OR next_attempt_utc <= $nowUtc)
                 ORDER BY occurred_on_utc;
                 """;
+            selectCommand.Parameters.AddWithValue("$nowUtc", _dateTimeProvider.UtcNow.ToString("O"));
 
             await using var reader = await selectCommand.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
@@ -41,7 +50,8 @@ public sealed class DeliveryTrackingUpdater : IDeliveryTrackingUpdater
                 pendingMessages.Add(new OutboxMessageRecord(
                     Guid.Parse(reader.GetString(0)),
                     reader.GetString(1),
-                    reader.GetString(2)));
+                    reader.GetString(2),
+                    reader.GetInt32(3)));
             }
         }
 
@@ -91,10 +101,12 @@ public sealed class DeliveryTrackingUpdater : IDeliveryTrackingUpdater
                     """
                     UPDATE outbox_messages
                     SET processed_on_utc = $processedOnUtc,
-                        error = NULL
+                        error = NULL,
+                        last_attempt_utc = $processedOnUtc,
+                        next_attempt_utc = NULL
                     WHERE id = $id;
                     """;
-                updateOutboxCommand.Parameters.AddWithValue("$processedOnUtc", DateTime.UtcNow.ToString("O"));
+                updateOutboxCommand.Parameters.AddWithValue("$processedOnUtc", _dateTimeProvider.UtcNow.ToString("O"));
                 updateOutboxCommand.Parameters.AddWithValue("$id", message.Id.ToString());
                 await updateOutboxCommand.ExecuteNonQueryAsync(cancellationToken);
 
@@ -103,16 +115,36 @@ public sealed class DeliveryTrackingUpdater : IDeliveryTrackingUpdater
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to process outbox message {OutboxMessageId}", message.Id);
+                var failedAttemptCount = message.RetryCount + 1;
+                var failedAtUtc = _dateTimeProvider.UtcNow;
+                var nextAttemptUtc = failedAttemptCount >= MaxRetryCount
+                    ? (DateTime?)null
+                    : failedAtUtc.AddSeconds(15 * failedAttemptCount);
+
+                _logger.LogError(
+                    ex,
+                    "Failed to process outbox message {OutboxMessageId} on attempt {AttemptNumber}",
+                    message.Id,
+                    failedAttemptCount);
 
                 await using var errorCommand = connection.CreateCommand();
                 errorCommand.CommandText =
                     """
                     UPDATE outbox_messages
-                    SET error = $error
+                    SET error = $error,
+                        retry_count = $retryCount,
+                        last_attempt_utc = $lastAttemptUtc,
+                        next_attempt_utc = $nextAttemptUtc,
+                        dead_lettered_on_utc = $deadLetteredOnUtc
                     WHERE id = $id;
                     """;
                 errorCommand.Parameters.AddWithValue("$error", ex.Message);
+                errorCommand.Parameters.AddWithValue("$retryCount", failedAttemptCount);
+                errorCommand.Parameters.AddWithValue("$lastAttemptUtc", failedAtUtc.ToString("O"));
+                errorCommand.Parameters.AddWithValue("$nextAttemptUtc", (object?)nextAttemptUtc?.ToString("O") ?? DBNull.Value);
+                errorCommand.Parameters.AddWithValue(
+                    "$deadLetteredOnUtc",
+                    failedAttemptCount >= MaxRetryCount ? failedAtUtc.ToString("O") : DBNull.Value);
                 errorCommand.Parameters.AddWithValue("$id", message.Id.ToString());
                 await errorCommand.ExecuteNonQueryAsync(cancellationToken);
             }
@@ -180,7 +212,7 @@ public sealed class DeliveryTrackingUpdater : IDeliveryTrackingUpdater
             ?? throw new InvalidOperationException($"Outbox message '{message.Id}' could not be deserialized.");
     }
 
-    private sealed record OutboxMessageRecord(Guid Id, string Type, string Payload);
+    private sealed record OutboxMessageRecord(Guid Id, string Type, string Payload, int RetryCount);
 
     private sealed record TrackingEventRecord(
         Guid EventId,

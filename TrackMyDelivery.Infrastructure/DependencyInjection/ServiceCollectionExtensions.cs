@@ -13,7 +13,6 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<SqliteConnectionFactory>();
         services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();
         services.AddScoped<IDeliveryRepository, SqliteDeliveryRepository>();
-        services.AddScoped<IDeliveryEventRepository, SqliteDeliveryEventRepository>();
         services.AddScoped<ITrackingEventRepository, SqliteTrackingEventRepository>();
         services.AddScoped<IDeliveryTrackingUpdater, DeliveryTrackingUpdater>();
 
