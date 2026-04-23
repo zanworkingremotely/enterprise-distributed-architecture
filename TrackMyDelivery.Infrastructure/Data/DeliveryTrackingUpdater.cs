@@ -55,7 +55,7 @@ public sealed class DeliveryTrackingUpdater : IDeliveryTrackingUpdater
             }
         }
 
-        var processedCount = 0;
+        var projectedEventCount = 0;
 
         foreach (var message in pendingMessages)
         {
@@ -67,33 +67,8 @@ public sealed class DeliveryTrackingUpdater : IDeliveryTrackingUpdater
 
                 await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
 
-                if (trackingEvent is not null)
-                {
-                    await using var insertTrackingCommand = connection.CreateCommand();
-                    insertTrackingCommand.Transaction = transaction;
-                    insertTrackingCommand.CommandText =
-                        """
-                        INSERT OR IGNORE INTO tracking_events (
-                            event_id,
-                            delivery_id,
-                            event_type,
-                            description,
-                            occurred_on_utc
-                        ) VALUES (
-                            $eventId,
-                            $deliveryId,
-                            $eventType,
-                            $description,
-                            $occurredOnUtc
-                        );
-                        """;
-                    insertTrackingCommand.Parameters.AddWithValue("$eventId", trackingEvent.EventId.ToString());
-                    insertTrackingCommand.Parameters.AddWithValue("$deliveryId", trackingEvent.DeliveryId.ToString());
-                    insertTrackingCommand.Parameters.AddWithValue("$eventType", trackingEvent.EventType);
-                    insertTrackingCommand.Parameters.AddWithValue("$description", trackingEvent.Description);
-                    insertTrackingCommand.Parameters.AddWithValue("$occurredOnUtc", trackingEvent.OccurredOnUtc.ToString("O"));
-                    await insertTrackingCommand.ExecuteNonQueryAsync(cancellationToken);
-                }
+                var wasProjected = trackingEvent is not null &&
+                    await TryProjectTrackingEventAsync(connection, transaction, trackingEvent, cancellationToken);
 
                 await using var updateOutboxCommand = connection.CreateCommand();
                 updateOutboxCommand.Transaction = transaction;
@@ -111,7 +86,11 @@ public sealed class DeliveryTrackingUpdater : IDeliveryTrackingUpdater
                 await updateOutboxCommand.ExecuteNonQueryAsync(cancellationToken);
 
                 await transaction.CommitAsync(cancellationToken);
-                processedCount++;
+
+                if (wasProjected)
+                {
+                    projectedEventCount++;
+                }
             }
             catch (Exception ex)
             {
@@ -150,7 +129,49 @@ public sealed class DeliveryTrackingUpdater : IDeliveryTrackingUpdater
             }
         }
 
-        return processedCount;
+        return projectedEventCount;
+    }
+
+    private async Task<bool> TryProjectTrackingEventAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        TrackingEventRecord trackingEvent,
+        CancellationToken cancellationToken)
+    {
+        await using var insertTrackingCommand = connection.CreateCommand();
+        insertTrackingCommand.Transaction = transaction;
+        insertTrackingCommand.CommandText =
+            """
+            INSERT OR IGNORE INTO tracking_events (
+                event_id,
+                delivery_id,
+                event_type,
+                description,
+                occurred_on_utc
+            ) VALUES (
+                $eventId,
+                $deliveryId,
+                $eventType,
+                $description,
+                $occurredOnUtc
+            );
+            """;
+        insertTrackingCommand.Parameters.AddWithValue("$eventId", trackingEvent.EventId.ToString());
+        insertTrackingCommand.Parameters.AddWithValue("$deliveryId", trackingEvent.DeliveryId.ToString());
+        insertTrackingCommand.Parameters.AddWithValue("$eventType", trackingEvent.EventType);
+        insertTrackingCommand.Parameters.AddWithValue("$description", trackingEvent.Description);
+        insertTrackingCommand.Parameters.AddWithValue("$occurredOnUtc", trackingEvent.OccurredOnUtc.ToString("O"));
+
+        var insertedCount = await insertTrackingCommand.ExecuteNonQueryAsync(cancellationToken);
+        if (insertedCount == 0)
+        {
+            _logger.LogInformation(
+                "Skipped already projected delivery event {DeliveryEventId}",
+                trackingEvent.EventId);
+            return false;
+        }
+
+        return true;
     }
 
     private static TrackingEventRecord? MapTrackingEvent(OutboxMessageRecord message)
