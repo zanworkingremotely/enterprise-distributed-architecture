@@ -23,7 +23,7 @@ The goal is to keep the repo practical:
 - `TrackMyDelivery.Worker`
   Background service that updates the delivery tracking timeline
 - `TrackMyDelivery.Domain.Tests`
-  Focused domain tests for delivery lifecycle behavior
+  Focused domain, persistence, and API integration tests
 
 ## Architecture diagram
 
@@ -138,11 +138,36 @@ SQLite database file:
 
 The tracking endpoint only becomes interesting once the worker is running, because the worker is what turns stored delivery events into tracking timeline entries.
 
+You can run the same flow from:
+
+- `docs\demo-flow.http`
+
+Set `@deliveryId` in that file after creating a delivery, then continue through the courier assignment, status update, and tracking timeline requests.
+
 ## Run tests
 
 ```powershell
 dotnet test .\TrackMyDelivery.slnx
 ```
+
+The test suite covers:
+
+- delivery lifecycle rules in the domain model
+- outbox persistence and retry behavior
+- API health check and delivery flow integration
+
+## Logs
+
+The API and worker write structured logs to the console and rolling files:
+
+- API logs: `TrackMyDelivery.Api\logs\log-*.txt`
+- Worker logs: `TrackMyDelivery.Worker\logs\worker-log-*.txt`
+
+Useful things to look for:
+
+- delivery IDs and tracking numbers during command handling
+- outbox message counts when deliveries are saved
+- worker messages showing how many delivery events were projected into the tracking timeline
 
 ## Why SQLite
 
@@ -158,6 +183,5 @@ That keeps the focus on architecture and flow instead of environment setup.
 ## Future improvements
 
 - Replace the polling worker with a broker-backed implementation
-- Add idempotency and retry policy around event processing
-- Add API integration tests
+- Add idempotency around event processing
 - Add deployment notes for Azure hosting

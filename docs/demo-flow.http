@@ -1,0 +1,43 @@
+@baseUrl = https://localhost:7226
+@deliveryId =
+
+### Health check
+GET {{baseUrl}}/health
+
+### Create a delivery
+# Copy the id from this response into @deliveryId above before running the next requests.
+POST {{baseUrl}}/api/deliveries
+Content-Type: application/json
+
+{
+  "trackingNumber": "TRK-DEMO-1001",
+  "recipientName": "Amina Jacobs",
+  "deliveryAddress": "42 Loop Street, Cape Town"
+}
+
+### Get all deliveries
+GET {{baseUrl}}/api/deliveries
+
+### Get delivery by id
+GET {{baseUrl}}/api/deliveries/{{deliveryId}}
+
+### Assign a courier
+POST {{baseUrl}}/api/deliveries/{{deliveryId}}/assign-courier
+Content-Type: application/json
+
+{
+  "courierName": "Nomsa Express"
+}
+
+### Mark the delivery out for delivery
+POST {{baseUrl}}/api/deliveries/{{deliveryId}}/status
+Content-Type: application/json
+
+{
+  "status": "OutForDelivery",
+  "reason": "Collected from warehouse"
+}
+
+### Get the tracking timeline
+# Run the worker first so stored delivery events are projected into the timeline.
+GET {{baseUrl}}/api/deliveries/{{deliveryId}}/tracking
