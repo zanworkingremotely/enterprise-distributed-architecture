@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using TrackMyDelivery.Infrastructure.Constants;
 
 namespace TrackMyDelivery.Infrastructure.Data;
 
@@ -35,6 +36,7 @@ public sealed class SqliteDatabaseInitializer
                 type TEXT NOT NULL,
                 payload TEXT NOT NULL,
                 occurred_on_utc TEXT NOT NULL,
+                published_on_utc TEXT NULL,
                 processed_on_utc TEXT NULL,
                 error TEXT NULL,
                 retry_count INTEGER NOT NULL DEFAULT 0,
@@ -57,6 +59,9 @@ public sealed class SqliteDatabaseInitializer
             CREATE INDEX IF NOT EXISTS idx_outbox_messages_processed
                 ON outbox_messages (processed_on_utc);
 
+            CREATE INDEX IF NOT EXISTS idx_outbox_messages_published
+                ON outbox_messages (published_on_utc, dead_lettered_on_utc, next_attempt_utc);
+
             CREATE INDEX IF NOT EXISTS idx_outbox_messages_next_attempt
                 ON outbox_messages (processed_on_utc, dead_lettered_on_utc, next_attempt_utc);
 
@@ -66,10 +71,11 @@ public sealed class SqliteDatabaseInitializer
 
         command.ExecuteNonQuery();
 
-        EnsureOutboxFieldExists(connection, "retry_count", "ALTER TABLE outbox_messages ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0;");
-        EnsureOutboxFieldExists(connection, "last_attempt_utc", "ALTER TABLE outbox_messages ADD COLUMN last_attempt_utc TEXT NULL;");
-        EnsureOutboxFieldExists(connection, "next_attempt_utc", "ALTER TABLE outbox_messages ADD COLUMN next_attempt_utc TEXT NULL;");
-        EnsureOutboxFieldExists(connection, "dead_lettered_on_utc", "ALTER TABLE outbox_messages ADD COLUMN dead_lettered_on_utc TEXT NULL;");
+        EnsureOutboxFieldExists(connection, StorageNames.PublishedOnUtc, $"ALTER TABLE {StorageNames.OutboxTable} ADD COLUMN {StorageNames.PublishedOnUtc} TEXT NULL;");
+        EnsureOutboxFieldExists(connection, StorageNames.RetryCount, $"ALTER TABLE {StorageNames.OutboxTable} ADD COLUMN {StorageNames.RetryCount} INTEGER NOT NULL DEFAULT 0;");
+        EnsureOutboxFieldExists(connection, StorageNames.LastAttemptUtc, $"ALTER TABLE {StorageNames.OutboxTable} ADD COLUMN {StorageNames.LastAttemptUtc} TEXT NULL;");
+        EnsureOutboxFieldExists(connection, StorageNames.NextAttemptUtc, $"ALTER TABLE {StorageNames.OutboxTable} ADD COLUMN {StorageNames.NextAttemptUtc} TEXT NULL;");
+        EnsureOutboxFieldExists(connection, StorageNames.DeadLetteredOnUtc, $"ALTER TABLE {StorageNames.OutboxTable} ADD COLUMN {StorageNames.DeadLetteredOnUtc} TEXT NULL;");
     }
 
     private static void EnsureOutboxFieldExists(
@@ -83,9 +89,10 @@ public sealed class SqliteDatabaseInitializer
             SELECT sql
             FROM sqlite_master
             WHERE type = 'table'
-              AND name = 'outbox_messages'
+              AND name = '{{OutboxTable}}'
             LIMIT 1;
             """;
+        outboxSchemaLookup.CommandText = outboxSchemaLookup.CommandText.Replace("{{OutboxTable}}", StorageNames.OutboxTable);
 
         var outboxDefinition = outboxSchemaLookup.ExecuteScalar() as string;
         if (outboxDefinition is not null &&

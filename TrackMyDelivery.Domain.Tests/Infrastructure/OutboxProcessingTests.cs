@@ -1,9 +1,12 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using TrackMydelivery.Application.Interfaces;
 using TrackMyDelivery.Domain.Deliveries.Entities;
 using TrackMyDelivery.Infrastructure.Data;
+using TrackMyDelivery.Infrastructure.Configuration;
+using TrackMyDelivery.Infrastructure.Messaging;
 using Xunit;
 
 namespace TrackMyDelivery.Domain.Tests.Infrastructure;
@@ -75,6 +78,34 @@ public sealed class OutboxProcessingTests : IDisposable
         Assert.Equal(1, processedCount);
         Assert.NotNull(processedOnUtc);
         Assert.Equal(1, trackingCount);
+    }
+
+    [Fact]
+    public async Task StoredDeliveryEventPublisher_ShouldPublishDeliveryMessageAndMarkOutboxMessagePublished()
+    {
+        var deliveryRepository = new SqliteDeliveryRepository(
+            _connectionFactory,
+            NullLogger<SqliteDeliveryRepository>.Instance);
+        var deliveryEventPublisher = new FakeDeliveryEventPublisher();
+        var outboxPublisher = CreateStoredDeliveryEventPublisher(deliveryEventPublisher);
+        var delivery = Delivery.Create("TRK-2002", "Jane Doe", "123 Main Road", _dateTimeProvider.UtcNow);
+
+        await deliveryRepository.AddAsync(delivery);
+
+        var publishedCount = await outboxPublisher.PublishPendingEventsAsync();
+
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync();
+
+        var publishedOnUtc = await ExecuteScalarAsync<string?>(
+            connection,
+            "SELECT published_on_utc FROM outbox_messages LIMIT 1;");
+
+        Assert.Equal(1, publishedCount);
+        Assert.Single(deliveryEventPublisher.PublishedEvents);
+        Assert.Equal(delivery.Id, deliveryEventPublisher.PublishedEvents[0].DeliveryId);
+        Assert.Equal("delivery.created", deliveryEventPublisher.PublishedEvents[0].RoutingKey);
+        Assert.NotNull(publishedOnUtc);
     }
 
     [Fact]
@@ -213,6 +244,16 @@ public sealed class OutboxProcessingTests : IDisposable
             NullLogger<DeliveryTrackingUpdater>.Instance);
     }
 
+    private StoredDeliveryEventPublisher CreateStoredDeliveryEventPublisher(IDeliveryEventPublisher deliveryEventPublisher)
+    {
+        return new StoredDeliveryEventPublisher(
+            _connectionFactory,
+            _dateTimeProvider,
+            deliveryEventPublisher,
+            Options.Create(new MessagingOptions { DeliveryEventRoutePrefix = "delivery" }),
+            NullLogger<StoredDeliveryEventPublisher>.Instance);
+    }
+
     private static async Task<T?> ExecuteScalarAsync<T>(SqliteConnection connection, string commandText)
     {
         await using var command = connection.CreateCommand();
@@ -313,6 +354,17 @@ public sealed class OutboxProcessingTests : IDisposable
         string? DeadLetteredOnUtc);
 
     private sealed record OutboxMessage(string Type, string Payload, string OccurredOnUtc);
+
+    private sealed class FakeDeliveryEventPublisher : IDeliveryEventPublisher
+    {
+        public List<DeliveryMessage> PublishedEvents { get; } = [];
+
+        public Task PublishAsync(DeliveryMessage deliveryEvent, CancellationToken cancellationToken = default)
+        {
+            PublishedEvents.Add(deliveryEvent);
+            return Task.CompletedTask;
+        }
+    }
 
     private sealed class ManualDateTimeProvider : IDateTimeProvider
     {
