@@ -3,8 +3,8 @@ using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using System.Text;
 using System.Text.Json;
-using TrackMyDelivery.Infrastructure.Configuration;
 using TrackMyDelivery.Infrastructure.Constants;
+using TrackMyDelivery.Infrastructure.Configuration;
 using TrackMyDelivery.Infrastructure.Messaging;
 
 namespace TrackMyDelivery.Worker;
@@ -85,6 +85,26 @@ public sealed class TrackingTimelineWorker : BackgroundService
             routingKey: $"{_deliveryMessagingOptions.DeliveryEventRoutePrefix}.#",
             cancellationToken: stoppingToken);
 
+        await channel.ExchangeDeclareAsync(
+            exchange: _deliveryMessagingOptions.FailedDeliveryEventsExchange,
+            type: ExchangeType.Direct,
+            durable: true,
+            autoDelete: false,
+            cancellationToken: stoppingToken);
+
+        await channel.QueueDeclareAsync(
+            queue: _deliveryMessagingOptions.FailedTrackingUpdatesQueue,
+            durable: true,
+            exclusive: false,
+            autoDelete: false,
+            cancellationToken: stoppingToken);
+
+        await channel.QueueBindAsync(
+            queue: _deliveryMessagingOptions.FailedTrackingUpdatesQueue,
+            exchange: _deliveryMessagingOptions.FailedDeliveryEventsExchange,
+            routingKey: _deliveryMessagingOptions.FailedDeliveryEventRoute,
+            cancellationToken: stoppingToken);
+
         await channel.BasicQosAsync(
             prefetchSize: 0,
             prefetchCount: _deliveryMessagingOptions.MaxInFlightDeliveryEvents,
@@ -117,16 +137,7 @@ public sealed class TrackingTimelineWorker : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(
-                    ex,
-                    InfrastructureLogMessages.DeliveryEventConsumeFailed,
-                    args.RoutingKey);
-
-                await channel.BasicNackAsync(
-                    deliveryTag: args.DeliveryTag,
-                    multiple: false,
-                    requeue: true,
-                    cancellationToken: stoppingToken);
+                await HandleFailedDeliveryEventAsync(channel, args, ex, stoppingToken);
             }
         };
 
@@ -142,5 +153,115 @@ public sealed class TrackingTimelineWorker : BackgroundService
             _deliveryMessagingOptions.DeliveryEventsExchange);
 
         await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken);
+    }
+
+    private async Task HandleFailedDeliveryEventAsync(
+        IChannel channel,
+        BasicDeliverEventArgs args,
+        Exception exception,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var deliveryMessage = JsonSerializer.Deserialize<DeliveryMessage>(
+                Encoding.UTF8.GetString(args.Body.ToArray()),
+                JsonOptions)
+                ?? throw new InvalidOperationException("Delivery message was empty.");
+
+            var nextAttemptNumber = DeliveryMessageAttemptTracker.ReadAttemptCount(args.BasicProperties.Headers) + 1;
+
+            _logger.LogError(
+                exception,
+                InfrastructureLogMessages.DeliveryEventConsumeFailed,
+                args.RoutingKey);
+
+            if (nextAttemptNumber >= _deliveryMessagingOptions.MaxDeliveryAttempts)
+            {
+                await PublishFailedDeliveryEventAsync(channel, deliveryMessage, nextAttemptNumber, exception.Message, cancellationToken);
+                await channel.BasicAckAsync(args.DeliveryTag, multiple: false, cancellationToken: cancellationToken);
+
+                _logger.LogWarning(
+                    InfrastructureLogMessages.DeliveryEventParked,
+                    deliveryMessage.EventId,
+                    nextAttemptNumber);
+
+                return;
+            }
+
+            await PublishRetryDeliveryEventAsync(channel, deliveryMessage, nextAttemptNumber, exception.Message, cancellationToken);
+            await channel.BasicAckAsync(args.DeliveryTag, multiple: false, cancellationToken: cancellationToken);
+
+            _logger.LogWarning(
+                InfrastructureLogMessages.DeliveryEventRetryScheduled,
+                nextAttemptNumber,
+                deliveryMessage.EventId);
+        }
+        catch (Exception retryHandlingException)
+        {
+            _logger.LogError(
+                retryHandlingException,
+                InfrastructureLogMessages.DeliveryEventFailureHandlingFailed,
+                args.BasicProperties.MessageId ?? "unknown");
+
+            await channel.BasicNackAsync(
+                deliveryTag: args.DeliveryTag,
+                multiple: false,
+                requeue: true,
+                cancellationToken: cancellationToken);
+        }
+    }
+
+    private async Task PublishRetryDeliveryEventAsync(
+        IChannel channel,
+        DeliveryMessage deliveryMessage,
+        int attemptNumber,
+        string failureReason,
+        CancellationToken cancellationToken)
+    {
+        var retryProperties = CreateDeliveryProperties(deliveryMessage, attemptNumber, failureReason);
+        var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(deliveryMessage, JsonOptions));
+
+        await channel.BasicPublishAsync(
+            exchange: _deliveryMessagingOptions.DeliveryEventsExchange,
+            routingKey: deliveryMessage.RoutingKey,
+            mandatory: false,
+            basicProperties: retryProperties,
+            body: body,
+            cancellationToken: cancellationToken);
+    }
+
+    private async Task PublishFailedDeliveryEventAsync(
+        IChannel channel,
+        DeliveryMessage deliveryMessage,
+        int attemptNumber,
+        string failureReason,
+        CancellationToken cancellationToken)
+    {
+        var failedProperties = CreateDeliveryProperties(deliveryMessage, attemptNumber, failureReason);
+        var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(deliveryMessage, JsonOptions));
+
+        await channel.BasicPublishAsync(
+            exchange: _deliveryMessagingOptions.FailedDeliveryEventsExchange,
+            routingKey: _deliveryMessagingOptions.FailedDeliveryEventRoute,
+            mandatory: false,
+            basicProperties: failedProperties,
+            body: body,
+            cancellationToken: cancellationToken);
+    }
+
+    private static BasicProperties CreateDeliveryProperties(
+        DeliveryMessage deliveryMessage,
+        int attemptNumber,
+        string failureReason)
+    {
+        return new BasicProperties
+        {
+            Persistent = true,
+            ContentType = "application/json",
+            MessageId = deliveryMessage.EventId.ToString(),
+            Type = deliveryMessage.EventType,
+            Timestamp = new AmqpTimestamp(new DateTimeOffset(deliveryMessage.OccurredOnUtc).ToUnixTimeSeconds()),
+            Headers = DeliveryMessageAttemptTracker.CreateHeaders(attemptNumber, failureReason)
+        };
     }
 }

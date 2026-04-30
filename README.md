@@ -7,8 +7,9 @@ The goal is to keep the repo practical:
 - .Net 10 API for delivery commands and queries
 - Domain model for delivery lifecycle rules
 - SQLite for local persistence
-- Outbox pattern for durable event storage
-- Background worker that processes outbox messages into a tracking timeline
+- Outbox pattern for durable delivery event storage
+- RabbitMQ for delivery event handoff between the API and worker
+- Background worker that updates the tracking timeline from delivery messages
 
 ## Solution structure
 
@@ -19,9 +20,9 @@ The goal is to keep the repo practical:
 - `TrackMyDelivery.Domain`
   Delivery aggregate, statuses, and domain events
 - `TrackMyDelivery.Infrastructure`
-  SQLite persistence, durable event storage, and tracking timeline updates
+  SQLite persistence, stored delivery events, RabbitMQ publishing, and tracking timeline updates
 - `TrackMyDelivery.Worker`
-  Background service that updates the delivery tracking timeline
+  Background service that consumes delivery messages and updates the tracking timeline
 - `TrackMyDelivery.Domain.Tests`
   Focused domain, persistence, and API integration tests
 
@@ -36,12 +37,15 @@ flowchart LR
         App --> Domain["Delivery aggregate"]
         Domain --> Events["Delivery events raised"]
         App --> DeliveryStore[("deliveries")]
-        App --> EventStore[("outbox_messages")]
+        App --> StoredEvents[("outbox_messages")]
     end
 
     subgraph AsyncFlow["Async flow"]
-        EventStore --> Worker["TrackMyDelivery.Worker"]
+        StoredEvents --> Publisher["Stored delivery event publisher"]
+        Publisher --> Broker[("RabbitMQ")]
+        Broker --> Worker["TrackMyDelivery.Worker"]
         Worker --> TimelineStore[("tracking_events")]
+        Worker --> FailedEvents[("failed delivery queue")]
     end
 
     subgraph ReadFlow["Read flow"]
@@ -51,7 +55,7 @@ flowchart LR
     end
 
     DeliveryStore -. stored in .-> Sqlite[("SQLite database")]
-    EventStore -. stored in .-> Sqlite
+    StoredEvents -. stored in .-> Sqlite
     TimelineStore -. stored in .-> Sqlite
 ```
 
@@ -77,11 +81,12 @@ flowchart TB
 
     Infrastructure["TrackMyDelivery.Infrastructure
     SQLite repositories
-    Delivery event storage
-    Tracking timeline updater"]
+    Stored delivery events
+    RabbitMQ publishing
+    Tracking timeline updates"]
 
     Worker["TrackMyDelivery.Worker
-    Background service
+    RabbitMQ consumer
     Async processing"]
 
     Api --> Application
@@ -95,18 +100,23 @@ flowchart TB
 
 1. A client creates a delivery through the API.
 2. The domain raises a delivery event.
-3. The API persists the delivery and stores the delivery event for background processing.
-4. The worker polls stored delivery events.
-5. The worker writes tracking events into the tracking timeline table.
-6. The API returns the tracking timeline from that projection.
+3. The API persists the delivery and stores the delivery event in the outbox.
+4. A background publisher reads stored delivery events and publishes them to RabbitMQ.
+5. The worker consumes delivery messages from RabbitMQ.
+6. The worker writes tracking events into the tracking timeline table.
+7. Failed delivery messages are retried a limited number of times and then moved to a failed-delivery queue.
+8. The API returns the tracking timeline from that projection.
 
-This keeps the write flow and the read model separate enough to demonstrate the pattern without making the repo hard to run.
+This keeps the write flow durable, the boundary crossing explicit, and the read model separate enough to demonstrate the pattern without making the repo hard to follow.
+
+RabbitMQ messaging is disabled by default in local settings, so the repo can still be explored without a broker running.
 
 ## Local run
 
 Requirements:
 
 - .NET 10 SDK
+- RabbitMQ only if you want to run the broker-backed async flow locally
 
 Run the API:
 
@@ -119,6 +129,11 @@ Run the worker in another terminal:
 ```powershell
 dotnet run --project .\TrackMyDelivery.Worker\TrackMyDelivery.Worker.csproj
 ```
+
+Enable RabbitMQ publishing and consumption by setting `Messaging:Enabled` to `true` in:
+
+- `TrackMyDelivery.Api\appsettings.json`
+- `TrackMyDelivery.Worker\appsettings.json`
 
 Useful URLs:
 
@@ -153,7 +168,8 @@ dotnet test .\TrackMyDelivery.slnx
 The test suite covers:
 
 - delivery lifecycle rules in the domain model
-- outbox persistence and retry behavior
+- outbox persistence, publish state, and retry behavior
+- delivery message attempt tracking
 - API health check and delivery flow integration
 
 ## Logs
@@ -166,8 +182,9 @@ The API and worker write structured logs to the console and rolling files:
 Useful things to look for:
 
 - delivery IDs and tracking numbers during command handling
-- outbox message counts when deliveries are saved
-- worker messages showing how many delivery events were projected into the tracking timeline
+- stored delivery event publish counts
+- worker messages showing delivery message consumption and tracking timeline updates
+- retry and failed-delivery queue messages when delivery message handling fails
 
 ## Why SQLite
 
@@ -182,6 +199,6 @@ That keeps the focus on architecture and flow instead of environment setup.
 
 ## Future improvements
 
-- Replace the polling worker with a broker-backed implementation
-- Add idempotency around event processing
+- Add a replay path for failed delivery messages
+- Add correlation IDs from API request to delivery message to tracking update
 - Add deployment notes for Azure hosting
