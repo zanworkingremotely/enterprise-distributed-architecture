@@ -8,6 +8,7 @@ public static class StorageNames
 
     public const string PublishedOnUtc = "published_on_utc";
     public const string ProcessedOnUtc = "processed_on_utc";
+    public const string CorrelationId = "correlation_id";
     public const string RetryCount = "retry_count";
     public const string LastAttemptUtc = "last_attempt_utc";
     public const string NextAttemptUtc = "next_attempt_utc";

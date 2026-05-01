@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.Data.Sqlite;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -7,6 +8,8 @@ using TrackMydelivery.Application.Interfaces;
 using TrackMyDelivery.Application.Deliveries.Models;
 using TrackMyDelivery.Application.Deliveries.Requests;
 using TrackMyDelivery.Application.Tracking.Models;
+using TrackMyDelivery.Infrastructure.Constants;
+using TrackMyDelivery.Infrastructure.Data;
 using Xunit;
 
 namespace TrackMyDelivery.Domain.Tests.Api;
@@ -85,6 +88,37 @@ public sealed class DeliveryApiTests : IDisposable
     }
 
     [Fact]
+    public async Task CreateDelivery_ShouldReturnAndStoreCorrelationId()
+    {
+        using var client = _apiFactory.CreateClient();
+        const string correlationId = "corr-api-test-1001";
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/deliveries")
+        {
+            Content = JsonContent.Create(new CreateDeliveryRequest
+            {
+                TrackingNumber = "TRK-API-2001",
+                RecipientName = "Lerato Moyo",
+                DeliveryAddress = "15 Wale Street, Cape Town"
+            })
+        };
+        request.Headers.Add(CorrelationNames.HeaderName, correlationId);
+
+        var response = await client.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+
+        Assert.True(response.Headers.TryGetValues(CorrelationNames.HeaderName, out var responseCorrelationIds));
+        Assert.Equal(correlationId, Assert.Single(responseCorrelationIds));
+
+        await using var connection = CreateOpenConnection();
+        var storedCorrelationId = await ExecuteScalarAsync<string?>(
+            connection,
+            $"SELECT {StorageNames.CorrelationId} FROM {StorageNames.OutboxTable} LIMIT 1;");
+
+        Assert.Equal(correlationId, storedCorrelationId);
+    }
+
+    [Fact]
     public async Task GetMissingDelivery_ShouldReturnNotFound()
     {
         using var client = _apiFactory.CreateClient();
@@ -135,6 +169,28 @@ public sealed class DeliveryApiTests : IDisposable
         var processedCount = await trackingUpdater.UpdateTrackingTimelineAsync();
 
         Assert.Equal(3, processedCount);
+    }
+
+    private SqliteConnection CreateOpenConnection()
+    {
+        var connectionFactory = _apiFactory.Services.GetRequiredService<SqliteConnectionFactory>();
+        var connection = connectionFactory.CreateConnection();
+        connection.Open();
+        return connection;
+    }
+
+    private static async Task<T?> ExecuteScalarAsync<T>(SqliteConnection connection, string commandText)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = commandText;
+        var result = await command.ExecuteScalarAsync();
+
+        if (result is null or DBNull)
+        {
+            return default;
+        }
+
+        return (T)result;
     }
 
     private static async Task<TResponse> PostJsonAsync<TRequest, TResponse>(

@@ -5,20 +5,25 @@ using TrackMydelivery.Application.Interfaces;
 using TrackMyDelivery.Domain.Common;
 using TrackMyDelivery.Domain.Deliveries;
 using TrackMyDelivery.Domain.Deliveries.Entities;
+using TrackMyDelivery.Infrastructure.Correlation;
+using TrackMyDelivery.Infrastructure.Constants;
 
 namespace TrackMyDelivery.Infrastructure.Data;
 
 public sealed class SqliteDeliveryRepository : IDeliveryRepository
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private readonly CorrelationContext _correlationContext;
     private readonly SqliteConnectionFactory _connectionFactory;
     private readonly ILogger<SqliteDeliveryRepository> _logger;
 
     public SqliteDeliveryRepository(
         SqliteConnectionFactory connectionFactory,
+        CorrelationContext correlationContext,
         ILogger<SqliteDeliveryRepository> logger)
     {
         _connectionFactory = connectionFactory;
+        _correlationContext = correlationContext;
         _logger = logger;
         new SqliteDatabaseInitializer(connectionFactory).Initialize();
     }
@@ -108,7 +113,7 @@ public sealed class SqliteDeliveryRepository : IDeliveryRepository
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
 
         await InsertDeliveryAsync(connection, transaction, delivery, cancellationToken);
-        await InsertOutboxMessagesAsync(connection, transaction, pendingEvents, cancellationToken);
+        await InsertOutboxMessagesAsync(connection, transaction, pendingEvents, _correlationContext.CorrelationId, cancellationToken);
 
         await transaction.CommitAsync(cancellationToken);
 
@@ -131,7 +136,7 @@ public sealed class SqliteDeliveryRepository : IDeliveryRepository
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
 
         await UpdateDeliveryAsync(connection, transaction, delivery, cancellationToken);
-        await InsertOutboxMessagesAsync(connection, transaction, pendingEvents, cancellationToken);
+        await InsertOutboxMessagesAsync(connection, transaction, pendingEvents, _correlationContext.CorrelationId, cancellationToken);
 
         await transaction.CommitAsync(cancellationToken);
 
@@ -211,6 +216,7 @@ public sealed class SqliteDeliveryRepository : IDeliveryRepository
         SqliteConnection connection,
         SqliteTransaction transaction,
         IReadOnlyCollection<IDomainEvent> domainEvents,
+        string? correlationId,
         CancellationToken cancellationToken)
     {
         foreach (var domainEvent in domainEvents)
@@ -224,6 +230,7 @@ public sealed class SqliteDeliveryRepository : IDeliveryRepository
                     type,
                     payload,
                     occurred_on_utc,
+                    correlation_id,
                     published_on_utc,
                     processed_on_utc,
                     error,
@@ -236,6 +243,7 @@ public sealed class SqliteDeliveryRepository : IDeliveryRepository
                     $type,
                     $payload,
                     $occurredOnUtc,
+                    $correlationId,
                     NULL,
                     NULL,
                     NULL,
@@ -250,6 +258,7 @@ public sealed class SqliteDeliveryRepository : IDeliveryRepository
             command.Parameters.AddWithValue("$type", domainEvent.GetType().FullName ?? domainEvent.GetType().Name);
             command.Parameters.AddWithValue("$payload", JsonSerializer.Serialize(domainEvent, domainEvent.GetType(), JsonOptions));
             command.Parameters.AddWithValue("$occurredOnUtc", domainEvent.OccurredOnUtc.ToString("O"));
+            command.Parameters.AddWithValue("$correlationId", (object?)correlationId ?? DBNull.Value);
 
             await command.ExecuteNonQueryAsync(cancellationToken);
         }

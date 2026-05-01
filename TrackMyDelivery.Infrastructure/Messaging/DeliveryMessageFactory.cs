@@ -13,6 +13,7 @@ internal static class DeliveryMessageFactory
         string eventType,
         string payload,
         DateTime occurredOnUtc,
+        string? correlationId,
         string deliveryEventRoutePrefix)
     {
         return eventType switch
@@ -21,16 +22,19 @@ internal static class DeliveryMessageFactory
                 Deserialize<DeliveryCreatedDomainEvent>(outboxMessageId, payload),
                 eventType,
                 payload,
+                correlationId,
                 $"{deliveryEventRoutePrefix}.created"),
             "TrackMyDelivery.Domain.Deliveries.Events.CourierAssignedDomainEvent" => CreateMessage(
                 Deserialize<CourierAssignedDomainEvent>(outboxMessageId, payload),
                 eventType,
                 payload,
+                correlationId,
                 $"{deliveryEventRoutePrefix}.assigned"),
             "TrackMyDelivery.Domain.Deliveries.Events.DeliveryStatusUpdatedDomainEvent" => CreateMessage(
                 Deserialize<DeliveryStatusUpdatedDomainEvent>(outboxMessageId, payload),
                 eventType,
                 payload,
+                correlationId,
                 $"{deliveryEventRoutePrefix}.status-updated"),
             _ => throw new InvalidOperationException($"Unsupported delivery event type '{eventType}'.")
         };
@@ -40,6 +44,7 @@ internal static class DeliveryMessageFactory
         TEvent deliveryEvent,
         string eventType,
         string payload,
+        string? correlationId,
         string routingKey)
         where TEvent : class
     {
@@ -49,6 +54,7 @@ internal static class DeliveryMessageFactory
             {
                 EventId = created.EventId,
                 DeliveryId = created.DeliveryId,
+                CorrelationId = correlationId,
                 EventType = eventType,
                 RoutingKey = routingKey,
                 Payload = payload,
@@ -58,6 +64,7 @@ internal static class DeliveryMessageFactory
             {
                 EventId = assigned.EventId,
                 DeliveryId = assigned.DeliveryId,
+                CorrelationId = correlationId,
                 EventType = eventType,
                 RoutingKey = routingKey,
                 Payload = payload,
@@ -67,6 +74,7 @@ internal static class DeliveryMessageFactory
             {
                 EventId = updated.EventId,
                 DeliveryId = updated.DeliveryId,
+                CorrelationId = correlationId,
                 EventType = eventType,
                 RoutingKey = routingKey,
                 Payload = payload,

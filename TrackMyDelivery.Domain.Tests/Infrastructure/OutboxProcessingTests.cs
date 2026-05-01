@@ -6,6 +6,7 @@ using TrackMydelivery.Application.Interfaces;
 using TrackMyDelivery.Domain.Deliveries.Entities;
 using TrackMyDelivery.Infrastructure.Data;
 using TrackMyDelivery.Infrastructure.Configuration;
+using TrackMyDelivery.Infrastructure.Correlation;
 using TrackMyDelivery.Infrastructure.Messaging;
 using Xunit;
 
@@ -14,6 +15,7 @@ namespace TrackMyDelivery.Domain.Tests.Infrastructure;
 public sealed class OutboxProcessingTests : IDisposable
 {
     private readonly string _databasePath;
+    private readonly CorrelationContext _correlationContext;
     private readonly SqliteConnectionFactory _connectionFactory;
     private readonly ManualDateTimeProvider _dateTimeProvider;
 
@@ -30,6 +32,7 @@ public sealed class OutboxProcessingTests : IDisposable
             .Build();
 
         _connectionFactory = new SqliteConnectionFactory(configuration);
+        _correlationContext = new CorrelationContext();
         _dateTimeProvider = new ManualDateTimeProvider(new DateTime(2026, 4, 21, 10, 0, 0, DateTimeKind.Utc));
         new SqliteDatabaseInitializer(_connectionFactory).Initialize();
     }
@@ -39,6 +42,7 @@ public sealed class OutboxProcessingTests : IDisposable
     {
         var deliveryRepository = new SqliteDeliveryRepository(
             _connectionFactory,
+            _correlationContext,
             NullLogger<SqliteDeliveryRepository>.Instance);
         var delivery = Delivery.Create("TRK-2001", "Jane Doe", "123 Main Road", _dateTimeProvider.UtcNow);
 
@@ -59,6 +63,7 @@ public sealed class OutboxProcessingTests : IDisposable
     {
         var deliveryRepository = new SqliteDeliveryRepository(
             _connectionFactory,
+            _correlationContext,
             NullLogger<SqliteDeliveryRepository>.Instance);
         var updater = CreateUpdater();
         var delivery = Delivery.Create("TRK-2002", "Jane Doe", "123 Main Road", _dateTimeProvider.UtcNow);
@@ -85,10 +90,12 @@ public sealed class OutboxProcessingTests : IDisposable
     {
         var deliveryRepository = new SqliteDeliveryRepository(
             _connectionFactory,
+            _correlationContext,
             NullLogger<SqliteDeliveryRepository>.Instance);
         var deliveryEventPublisher = new FakeDeliveryEventPublisher();
         var outboxPublisher = CreateStoredDeliveryEventPublisher(deliveryEventPublisher);
         var delivery = Delivery.Create("TRK-2002", "Jane Doe", "123 Main Road", _dateTimeProvider.UtcNow);
+        _correlationContext.CorrelationId = "corr-outbox-test-1001";
 
         await deliveryRepository.AddAsync(delivery);
 
@@ -105,6 +112,7 @@ public sealed class OutboxProcessingTests : IDisposable
         Assert.Single(deliveryEventPublisher.PublishedEvents);
         Assert.Equal(delivery.Id, deliveryEventPublisher.PublishedEvents[0].DeliveryId);
         Assert.Equal("delivery.created", deliveryEventPublisher.PublishedEvents[0].RoutingKey);
+        Assert.Equal("corr-outbox-test-1001", deliveryEventPublisher.PublishedEvents[0].CorrelationId);
         Assert.NotNull(publishedOnUtc);
     }
 
@@ -113,6 +121,7 @@ public sealed class OutboxProcessingTests : IDisposable
     {
         var deliveryRepository = new SqliteDeliveryRepository(
             _connectionFactory,
+            _correlationContext,
             NullLogger<SqliteDeliveryRepository>.Instance);
         var updater = CreateUpdater();
         var delivery = Delivery.Create("TRK-2003", "Jane Doe", "123 Main Road", _dateTimeProvider.UtcNow);
@@ -376,3 +385,4 @@ public sealed class OutboxProcessingTests : IDisposable
         public DateTime UtcNow { get; set; }
     }
 }
+

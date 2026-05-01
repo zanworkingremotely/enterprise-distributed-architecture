@@ -36,6 +36,7 @@ public sealed class SqliteDatabaseInitializer
                 type TEXT NOT NULL,
                 payload TEXT NOT NULL,
                 occurred_on_utc TEXT NOT NULL,
+                correlation_id TEXT NULL,
                 published_on_utc TEXT NULL,
                 processed_on_utc TEXT NULL,
                 error TEXT NULL,
@@ -72,6 +73,7 @@ public sealed class SqliteDatabaseInitializer
         command.ExecuteNonQuery();
 
         EnsureOutboxFieldExists(connection, StorageNames.PublishedOnUtc, $"ALTER TABLE {StorageNames.OutboxTable} ADD COLUMN {StorageNames.PublishedOnUtc} TEXT NULL;");
+        EnsureOutboxFieldExists(connection, StorageNames.CorrelationId, $"ALTER TABLE {StorageNames.OutboxTable} ADD COLUMN {StorageNames.CorrelationId} TEXT NULL;");
         EnsureOutboxFieldExists(connection, StorageNames.RetryCount, $"ALTER TABLE {StorageNames.OutboxTable} ADD COLUMN {StorageNames.RetryCount} INTEGER NOT NULL DEFAULT 0;");
         EnsureOutboxFieldExists(connection, StorageNames.LastAttemptUtc, $"ALTER TABLE {StorageNames.OutboxTable} ADD COLUMN {StorageNames.LastAttemptUtc} TEXT NULL;");
         EnsureOutboxFieldExists(connection, StorageNames.NextAttemptUtc, $"ALTER TABLE {StorageNames.OutboxTable} ADD COLUMN {StorageNames.NextAttemptUtc} TEXT NULL;");

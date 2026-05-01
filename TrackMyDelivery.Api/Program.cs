@@ -1,5 +1,7 @@
 using Serilog;
 using TrackMyDelivery.Application.DependencyInjection;
+using TrackMyDelivery.Infrastructure.Correlation;
+using TrackMyDelivery.Infrastructure.Constants;
 using TrackMyDelivery.Infrastructure.DependencyInjection;
 
 Log.Logger = new LoggerConfiguration()
@@ -27,6 +29,20 @@ var app = builder.Build();
 
 // Configure the HTTP request pipeline.
 app.UseExceptionHandler();
+app.Use(async (context, next) =>
+{
+    var correlationContext = context.RequestServices.GetRequiredService<CorrelationContext>();
+    var correlationId = context.Request.Headers.TryGetValue(CorrelationNames.HeaderName, out var requestCorrelationId) &&
+        !string.IsNullOrWhiteSpace(requestCorrelationId)
+        ? requestCorrelationId.ToString()
+        : Guid.NewGuid().ToString("N");
+
+    correlationContext.CorrelationId = correlationId;
+    context.TraceIdentifier = correlationId;
+    context.Response.Headers[CorrelationNames.HeaderName] = correlationId;
+
+    await next();
+});
 
 if (app.Environment.IsDevelopment())
 {

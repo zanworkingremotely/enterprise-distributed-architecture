@@ -121,6 +121,10 @@ public sealed class TrackingTimelineWorker : BackgroundService
                     JsonOptions)
                     ?? throw new InvalidOperationException("Delivery message was empty.");
 
+                using var correlationScope = _logger.BeginScope(new Dictionary<string, object?>
+                {
+                    [CorrelationNames.LogPropertyName] = deliveryMessage.CorrelationId ?? string.Empty
+                });
                 using var scope = _serviceProvider.CreateScope();
                 var trackingTimelineUpdater = scope.ServiceProvider.GetRequiredService<ITrackingTimelineUpdater>();
                 var wasProjected = await trackingTimelineUpdater.ApplyDeliveryEventAsync(deliveryMessage, stoppingToken);
@@ -168,6 +172,10 @@ public sealed class TrackingTimelineWorker : BackgroundService
                 JsonOptions)
                 ?? throw new InvalidOperationException("Delivery message was empty.");
 
+            using var correlationScope = _logger.BeginScope(new Dictionary<string, object?>
+            {
+                [CorrelationNames.LogPropertyName] = deliveryMessage.CorrelationId ?? string.Empty
+            });
             var nextAttemptNumber = DeliveryMessageAttemptTracker.ReadAttemptCount(args.BasicProperties.Headers) + 1;
 
             _logger.LogError(

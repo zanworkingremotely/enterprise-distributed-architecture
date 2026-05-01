@@ -48,9 +48,15 @@ public sealed class RabbitMqDeliveryEventPublisher : IDeliveryEventPublisher
             ContentType = "application/json",
             MessageId = deliveryEvent.EventId.ToString(),
             Type = deliveryEvent.EventType,
-            Timestamp = new AmqpTimestamp(new DateTimeOffset(deliveryEvent.OccurredOnUtc).ToUnixTimeSeconds())
+            Timestamp = new AmqpTimestamp(new DateTimeOffset(deliveryEvent.OccurredOnUtc).ToUnixTimeSeconds()),
+            Headers = DeliveryMessageAttemptTracker.CreateHeaders(0)
         };
+        properties.Headers[CorrelationNames.HeaderName] = deliveryEvent.CorrelationId ?? string.Empty;
 
+        using var correlationScope = _logger.BeginScope(new Dictionary<string, object?>
+        {
+            [CorrelationNames.LogPropertyName] = deliveryEvent.CorrelationId ?? string.Empty
+        });
         var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(deliveryEvent, JsonOptions));
 
         await channel.BasicPublishAsync(

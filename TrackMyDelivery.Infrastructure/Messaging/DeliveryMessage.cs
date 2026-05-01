@@ -4,6 +4,7 @@ public sealed class DeliveryMessage
 {
     public Guid EventId { get; init; }
     public Guid DeliveryId { get; init; }
+    public string? CorrelationId { get; init; }
     public string EventType { get; init; } = string.Empty;
     public string RoutingKey { get; init; } = string.Empty;
     public string Payload { get; init; } = string.Empty;

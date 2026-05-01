@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using TrackMydelivery.Application.Interfaces;
 using TrackMyDelivery.Infrastructure.Configuration;
+using TrackMyDelivery.Infrastructure.Correlation;
 using TrackMyDelivery.Infrastructure.Data;
 using TrackMyDelivery.Infrastructure.Messaging;
 
@@ -12,6 +13,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddSingleton(configuration);
+        services.AddSingleton<CorrelationContext>();
         services.Configure<StorageOptions>(configuration.GetSection(StorageOptions.SectionName));
         services.Configure<MessagingOptions>(configuration.GetSection(MessagingOptions.SectionName));
         services.AddSingleton<SqliteConnectionFactory>();

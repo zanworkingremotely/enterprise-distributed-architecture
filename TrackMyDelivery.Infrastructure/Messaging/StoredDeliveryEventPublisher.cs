@@ -41,7 +41,7 @@ public sealed class StoredDeliveryEventPublisher
         {
             selectCommand.CommandText =
                 $"""
-                SELECT id, type, payload, occurred_on_utc, retry_count
+                SELECT id, type, payload, occurred_on_utc, retry_count, correlation_id
                 FROM {StorageNames.OutboxTable}
                 WHERE {StorageNames.PublishedOnUtc} IS NULL
                   AND {StorageNames.DeadLetteredOnUtc} IS NULL
@@ -61,7 +61,8 @@ public sealed class StoredDeliveryEventPublisher
                         pendingMessagesReader.GetString(3),
                         null,
                         System.Globalization.DateTimeStyles.RoundtripKind),
-                    pendingMessagesReader.GetInt32(4)));
+                    pendingMessagesReader.GetInt32(4),
+                    pendingMessagesReader.IsDBNull(5) ? null : pendingMessagesReader.GetString(5)));
             }
         }
 
@@ -78,8 +79,13 @@ public sealed class StoredDeliveryEventPublisher
                     message.EventType,
                     message.Payload,
                     message.OccurredOnUtc,
+                    message.CorrelationId,
                     _messagingOptions.DeliveryEventRoutePrefix);
 
+                using var correlationScope = _logger.BeginScope(new Dictionary<string, object?>
+                {
+                    [CorrelationNames.LogPropertyName] = deliveryEvent.CorrelationId ?? string.Empty
+                });
                 await _deliveryEventPublisher.PublishAsync(deliveryEvent, cancellationToken);
 
                 await using var markPublishedCommand = connection.CreateCommand();
@@ -144,5 +150,6 @@ public sealed class StoredDeliveryEventPublisher
         string EventType,
         string Payload,
         DateTime OccurredOnUtc,
-        int RetryCount);
+        int RetryCount,
+        string? CorrelationId);
 }
