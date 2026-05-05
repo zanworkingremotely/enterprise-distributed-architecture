@@ -12,15 +12,18 @@ namespace TrackMyDelivery.Worker;
 public sealed class TrackingTimelineWorker : BackgroundService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private readonly FailedDeliveryMessageReplay _failedDeliveryMessageReplay;
     private readonly ILogger<TrackingTimelineWorker> _logger;
     private readonly IServiceProvider _serviceProvider;
     private readonly MessagingOptions _deliveryMessagingOptions;
 
     public TrackingTimelineWorker(
+        FailedDeliveryMessageReplay failedDeliveryMessageReplay,
         IServiceProvider serviceProvider,
         IOptions<MessagingOptions> messagingOptions,
         ILogger<TrackingTimelineWorker> logger)
     {
+        _failedDeliveryMessageReplay = failedDeliveryMessageReplay;
         _serviceProvider = serviceProvider;
         _deliveryMessagingOptions = messagingOptions.Value;
         _logger = logger;
@@ -186,6 +189,11 @@ public sealed class TrackingTimelineWorker : BackgroundService
             if (nextAttemptNumber >= _deliveryMessagingOptions.MaxDeliveryAttempts)
             {
                 await PublishFailedDeliveryEventAsync(channel, deliveryMessage, nextAttemptNumber, exception.Message, cancellationToken);
+                await _failedDeliveryMessageReplay.RecordParkedMessageAsync(
+                    deliveryMessage,
+                    nextAttemptNumber,
+                    exception.Message,
+                    cancellationToken);
                 await channel.BasicAckAsync(args.DeliveryTag, multiple: false, cancellationToken: cancellationToken);
 
                 _logger.LogWarning(

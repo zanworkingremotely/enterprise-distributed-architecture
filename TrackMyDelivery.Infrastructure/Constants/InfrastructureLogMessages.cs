@@ -11,6 +11,10 @@ public static class InfrastructureLogMessages
     public const string DeliveryEventRetryScheduled = "Scheduled retry {AttemptNumber} for delivery event {DeliveryEventId} after processing failed";
     public const string DeliveryEventParked = "Moved delivery event {DeliveryEventId} to the failed-delivery queue after {AttemptNumber} failed attempt(s)";
     public const string DeliveryEventFailureHandlingFailed = "Failed to schedule retry or park delivery event {DeliveryEventId}";
+    public const string FailedDeliveryMessageRecorded = "Recorded parked delivery event {DeliveryEventId} for replay after {AttemptNumber} failed attempt(s)";
+    public const string FailedDeliveryMessageReplayed = "Replayed parked delivery event {DeliveryEventId} for delivery {DeliveryId}";
+    public const string FailedDeliveryMessageReplayFailed = "Failed to replay parked delivery event {DeliveryEventId}";
+    public const string FailedDeliveryReplayDisabled = "Failed-delivery replay is disabled because RabbitMQ publishing is disabled";
 
     public const string RabbitPublishingDisabled = "RabbitMQ publishing is disabled";
     public const string RabbitPublishingLoopFailed = "RabbitMQ delivery event dispatch loop failed";

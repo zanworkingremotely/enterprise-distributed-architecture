@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using TrackMyDelivery.Application.Deliveries.Commands.AssignCourier;
 using TrackMyDelivery.Application.Deliveries.Commands.CreateDelivery;
 using TrackMyDelivery.Application.Deliveries.Commands.UpdateDeliveryStatus;
+using TrackMyDelivery.Application.Operations.Commands.ReplayFailedDeliveryMessages;
 using TrackMyDelivery.Application.Deliveries.Queries.GetAllDeliveries;
 using TrackMyDelivery.Application.Deliveries.Queries.GetDeliveryById;
 using TrackMyDelivery.Application.Tracking.Queries.GetTrackingTimeline;
@@ -18,6 +19,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<GetAllDeliveriesQueryHandler>();
         services.AddScoped<GetDeliveryByIdQueryHandler>();
         services.AddScoped<GetTrackingTimelineQueryHandler>();
+        services.AddScoped<ReplayFailedDeliveryMessagesCommandHandler>();
 
         return services;
     }

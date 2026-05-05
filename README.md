@@ -46,6 +46,7 @@ flowchart LR
         Broker --> Worker["TrackMyDelivery.Worker"]
         Worker --> TimelineStore[("tracking_events")]
         Worker --> FailedEvents[("failed delivery queue")]
+        Worker --> FailedLedger[("failed_delivery_messages")]
     end
 
     subgraph ReadFlow["Read flow"]
@@ -57,6 +58,7 @@ flowchart LR
     DeliveryStore -. stored in .-> Sqlite[("SQLite database")]
     StoredEvents -. stored in .-> Sqlite
     TimelineStore -. stored in .-> Sqlite
+    FailedLedger -. stored in .-> Sqlite
 ```
 
 ## Layered view
@@ -105,9 +107,12 @@ flowchart TB
 5. The worker consumes delivery messages from RabbitMQ.
 6. The worker writes tracking events into the tracking timeline table.
 7. Failed delivery messages are retried a limited number of times and then moved to a failed-delivery queue.
-8. The API returns the tracking timeline from that projection.
+8. Parked delivery failures are also written to the database so they can be reviewed and replayed manually.
+9. The API returns the tracking timeline from that projection.
 
 This keeps the write flow durable, the boundary crossing explicit, and the read model separate enough to demonstrate the pattern without making the repo hard to follow.
+
+Correlation IDs are carried from the API boundary into stored delivery events, published delivery messages, and worker logs so one request can be traced through the async flow.
 
 RabbitMQ messaging is disabled by default in local settings, so the repo can still be explored without a broker running.
 
@@ -150,8 +155,11 @@ SQLite database file:
 2. `POST /api/deliveries/{deliveryId}/assign-courier`
 3. `POST /api/deliveries/{deliveryId}/status`
 4. `GET /api/deliveries/{deliveryId}/tracking`
+5. `POST /api/operations/replay-failed-delivery-messages?maxCount=10`
 
 The tracking endpoint only becomes interesting once the worker is running, because the worker is what turns stored delivery events into tracking timeline entries.
+
+The replay endpoint is there for failure recovery. It republishes up to the requested number of parked delivery messages and marks them as replayed in the failure ledger.
 
 You can run the same flow from:
 
@@ -169,7 +177,9 @@ The test suite covers:
 
 - delivery lifecycle rules in the domain model
 - outbox persistence, publish state, and retry behavior
+- parked delivery replay behavior
 - delivery message attempt tracking
+- correlation propagation
 - API health check and delivery flow integration
 
 ## Logs
@@ -185,6 +195,7 @@ Useful things to look for:
 - stored delivery event publish counts
 - worker messages showing delivery message consumption and tracking timeline updates
 - retry and failed-delivery queue messages when delivery message handling fails
+- replay messages when parked delivery failures are sent back through RabbitMQ
 
 ## Why SQLite
 
@@ -199,6 +210,5 @@ That keeps the focus on architecture and flow instead of environment setup.
 
 ## Future improvements
 
-- Add a replay path for failed delivery messages
-- Add correlation IDs from API request to delivery message to tracking update
 - Add deployment notes for Azure hosting
+- Add auth around operational endpoints before any shared deployment

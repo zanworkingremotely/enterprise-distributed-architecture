@@ -18,6 +18,8 @@ public static class ServiceCollectionExtensions
         services.Configure<MessagingOptions>(configuration.GetSection(MessagingOptions.SectionName));
         services.AddSingleton<SqliteConnectionFactory>();
         services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();
+        services.AddSingleton<FailedDeliveryMessageReplay>();
+        services.AddSingleton<IFailedDeliveryMessageReplay>(serviceProvider => serviceProvider.GetRequiredService<FailedDeliveryMessageReplay>());
         services.AddScoped<IDeliveryRepository, SqliteDeliveryRepository>();
         services.AddScoped<ITrackingEventRepository, SqliteTrackingEventRepository>();
         services.AddScoped<IDeliveryTrackingUpdater, DeliveryTrackingUpdater>();

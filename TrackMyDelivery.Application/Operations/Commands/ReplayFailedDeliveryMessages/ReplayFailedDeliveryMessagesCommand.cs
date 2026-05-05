@@ -1,0 +1,3 @@
+namespace TrackMyDelivery.Application.Operations.Commands.ReplayFailedDeliveryMessages;
+
+public sealed record ReplayFailedDeliveryMessagesCommand(int MaxCount);

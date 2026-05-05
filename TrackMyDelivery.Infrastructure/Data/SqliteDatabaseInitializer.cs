@@ -54,6 +54,20 @@ public sealed class SqliteDatabaseInitializer
                 occurred_on_utc TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS failed_delivery_messages (
+                event_id TEXT PRIMARY KEY,
+                delivery_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                routing_key TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                correlation_id TEXT NULL,
+                occurred_on_utc TEXT NOT NULL,
+                parked_on_utc TEXT NOT NULL,
+                failure_reason TEXT NULL,
+                attempt_count INTEGER NOT NULL,
+                replayed_on_utc TEXT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_deliveries_tracking_number
                 ON deliveries (tracking_number);
 
@@ -68,6 +82,9 @@ public sealed class SqliteDatabaseInitializer
 
             CREATE INDEX IF NOT EXISTS idx_tracking_events_delivery_occurred
                 ON tracking_events (delivery_id, occurred_on_utc);
+
+            CREATE INDEX IF NOT EXISTS idx_failed_delivery_messages_replayed
+                ON failed_delivery_messages (replayed_on_utc, parked_on_utc);
             """;
 
         command.ExecuteNonQuery();
