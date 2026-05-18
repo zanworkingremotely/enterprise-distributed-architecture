@@ -1,0 +1,59 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: trackmydelivery-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  api:
+    build:
+      context: .
+      dockerfile: TrackMyDelivery.Api/Dockerfile
+    container_name: trackmydelivery-api
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      Storage__DatabasePath: /data/track-my-delivery.db
+      Messaging__Enabled: "true"
+      Messaging__HostName: rabbitmq
+      Messaging__Port: "5672"
+      Messaging__UserName: guest
+      Messaging__Password: guest
+    ports:
+      - "5111:8080"
+    volumes:
+      - trackmydelivery-data:/data
+
+  worker:
+    build:
+      context: .
+      dockerfile: TrackMyDelivery.Worker/Dockerfile
+    container_name: trackmydelivery-worker
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      api:
+        condition: service_started
+    environment:
+      DOTNET_ENVIRONMENT: Production
+      Storage__DatabasePath: /data/track-my-delivery.db
+      Messaging__Enabled: "true"
+      Messaging__HostName: rabbitmq
+      Messaging__Port: "5672"
+      Messaging__UserName: guest
+      Messaging__Password: guest
+    volumes:
+      - trackmydelivery-data:/data
+
+volumes:
+  trackmydelivery-data:

@@ -1,0 +1,12 @@
+**/bin/
+**/obj/
+**/.vs/
+**/logs/
+TrackMyDelivery.SharedData/
+TestResults/
+coverage/
+.git/
+.github/
+*.db
+*.db-shm
+*.db-wal

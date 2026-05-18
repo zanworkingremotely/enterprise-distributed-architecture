@@ -123,6 +123,22 @@ Requirements:
 - .NET 10 SDK
 - RabbitMQ only if you want to run the broker-backed async flow locally
 
+Run the full local runtime with Docker:
+
+```powershell
+docker compose up --build
+```
+
+This starts:
+
+- API: `http://localhost:5111`
+- RabbitMQ broker: `localhost:5672`
+- RabbitMQ management UI: `http://localhost:15672` (`guest` / `guest`)
+- Worker: consumes delivery events and updates the tracking timeline
+- Shared SQLite volume: `/data/track-my-delivery.db` inside the API and worker containers
+
+The Compose runtime enables RabbitMQ messaging for both the API and worker through environment variables, while keeping the default appsettings broker-free for simple local exploration.
+
 Run the API:
 
 ```powershell
